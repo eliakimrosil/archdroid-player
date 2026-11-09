@@ -1,0 +1,34 @@
+#!/bin/bash
+if [ -z "$1" ]; then
+    echo "Usage: play-yt <search_query_or_url>"
+    echo "Example: play-yt 'calvin harris outside'"
+    exit 1
+fi
+
+QUERY="$*"
+case "$QUERY" in
+    http://*|https://*)
+        TARGET="$QUERY"
+        ;;
+    *)
+        TARGET="ytsearch1:$QUERY"
+        ;;
+esac
+
+echo "Fetching stream from YouTube: $QUERY..."
+TITLE=$(yt-dlp --get-title "$TARGET" 2>/dev/null | head -n 1)
+STREAM_URL=$(yt-dlp -f bestaudio -g "$TARGET" 2>/dev/null | head -n 1)
+
+if [ -z "$STREAM_URL" ]; then
+    echo "Error: Could not resolve audio stream for '$QUERY'"
+    exit 1
+fi
+
+echo "▶ Playing: ${TITLE:-$QUERY}"
+if command -v archdroid-toast >/dev/null 2>&1; then
+    archdroid-toast "▶ ${TITLE:-$QUERY}"
+fi
+if command -v archdroid-notification >/dev/null 2>&1; then
+    archdroid-notification -t "YouTube Music" -c "${TITLE:-$QUERY}" -p default
+fi
+archdroid-media-player play "$STREAM_URL"

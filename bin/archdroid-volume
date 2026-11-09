@@ -1,0 +1,37 @@
+#!/bin/bash
+STREAM="music"
+LEVEL=""
+SHOW_UI="false"
+
+if [ $# -eq 0 ]; then
+    curl -s "http://127.0.0.1:48292/api/volume" 2>/dev/null
+    echo ""
+    exit 0
+fi
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -s|--stream) STREAM="$2"; shift 2 ;;
+        --ui) SHOW_UI="true"; shift ;;
+        music|media|notification|notify|alarm|ring|ringer|voice|call)
+            STREAM="$1"; shift ;;
+        -h|--help)
+            echo "Usage: archdroid-volume [stream] [0-100] [--ui]"
+            echo "Streams: music (default), notification, alarm, ring"
+            exit 0
+            ;;
+        *)
+            LEVEL="$1"; shift ;;
+    esac
+done
+
+if [ -z "$LEVEL" ]; then
+    curl -s "http://127.0.0.1:48292/api/volume" 2>/dev/null
+    echo ""
+else
+    curl -s -X POST "http://127.0.0.1:48292/api/volume" \
+        -d "stream=$STREAM" \
+        -d "volume=$LEVEL" \
+        -d "show_ui=$SHOW_UI" 2>/dev/null
+    echo ""
+fi

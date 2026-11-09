@@ -1,0 +1,74 @@
+#!/bin/bash
+ACTION="status"
+FILE_PATH=""
+VOL=""
+LOOP="false"
+POS=""
+
+if [ $# -eq 0 ]; then
+    curl -s "http://127.0.0.1:48292/api/media?action=status" 2>/dev/null
+    echo ""
+    exit 0
+fi
+
+case "$1" in
+    play|pause|resume|stop|seek|volume|info|status)
+        ACTION="$1"
+        shift
+        ;;
+    -h|--help|help)
+        echo "Usage: archdroid-media-player <command> [options]"
+        echo "Commands:"
+        echo "  play <file_or_url> [-v 0-100] [-l|--loop]   Play audio file or stream"
+        echo "  pause                                       Pause playback"
+        echo "  resume                                      Resume playback"
+        echo "  stop                                        Stop playback"
+        echo "  seek <seconds>                              Seek to position in seconds"
+        echo "  volume <0-100>                              Set player volume"
+        echo "  info | status                               Show playback status JSON"
+        exit 0
+        ;;
+    *)
+        ACTION="play"
+        FILE_PATH="$1"
+        shift
+        ;;
+esac
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -f|--file) FILE_PATH="$2"; shift 2 ;;
+        -v|--volume) VOL="$2"; shift 2 ;;
+        -l|--loop) LOOP="true"; shift ;;
+        *)
+            if [ "$ACTION" = "play" ] && [ -z "$FILE_PATH" ]; then
+                FILE_PATH="$1"
+            elif [ "$ACTION" = "seek" ] && [ -z "$POS" ]; then
+                POS="$1"
+            elif [ "$ACTION" = "volume" ] && [ -z "$VOL" ]; then
+                VOL="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [ "$ACTION" = "play" ] && [ -n "$FILE_PATH" ]; then
+    case "$FILE_PATH" in
+        http://*|https://*|rtsp://*/*|/*) ;;
+        *) FILE_PATH="$(pwd)/$FILE_PATH" ;;
+    esac
+    ARGS=(-d "action=play" --data-urlencode "path=$FILE_PATH" -d "loop=$LOOP")
+    [ -n "$VOL" ] && ARGS+=(-d "volume=$VOL")
+    curl -s -X POST "http://127.0.0.1:48292/api/media" "${ARGS[@]}" 2>/dev/null
+    echo ""
+elif [ "$ACTION" = "seek" ]; then
+    curl -s -X POST "http://127.0.0.1:48292/api/media" -d "action=seek" -d "position=$POS" 2>/dev/null
+    echo ""
+elif [ "$ACTION" = "volume" ]; then
+    curl -s -X POST "http://127.0.0.1:48292/api/media" -d "action=volume" -d "volume=$VOL" 2>/dev/null
+    echo ""
+else
+    curl -s -X POST "http://127.0.0.1:48292/api/media" -d "action=$ACTION" 2>/dev/null
+    echo ""
+fi

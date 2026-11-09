@@ -1,0 +1,114 @@
+#!/bin/bash
+CMD="${1:-status}"
+shift 2>/dev/null || true
+
+case "$CMD" in
+    status)
+        echo "=== ArchDroid 2-Tier Audio Subsystem ==="
+        echo -n "Tier 1 (HTTP Media/TTS/Volume Bridge :48292): "
+        STATUS=$(curl -s --connect-timeout 2 "http://127.0.0.1:48292/api/status" 2>/dev/null)
+        if echo "$STATUS" | grep -q '"status":"online"'; then
+            echo "ONLINE"
+        else
+            echo "OFFLINE"
+        fi
+        echo -n "Tier 2 (Real-Time Low-Latency PCM Sink :48293): "
+        if (exec 3<>/dev/tcp/127.0.0.1/48293) 2>/dev/null; then
+            exec 3<&- 3>&-
+            echo "ONLINE (48000Hz 16-bit Stereo AudioTrack)"
+        else
+            echo "OFFLINE"
+        fi
+        echo ""
+        echo "Media Player State:"
+        curl -s "http://127.0.0.1:48292/api/media?action=status" 2>/dev/null
+        echo ""
+        echo "System Volumes:"
+        curl -s "http://127.0.0.1:48292/api/volume" 2>/dev/null
+        echo ""
+        ;;
+
+    test)
+        echo "Playing synthesized stereo harmonic chime via ArchDroid PCM AudioTrack (127.0.0.1:48293)..."
+        if command -v python3 >/dev/null 2>&1; then
+            python3 -c '
+import math, struct, socket
+rate = 48000
+dur = 1.2
+n = int(rate * dur)
+buf = bytearray(n * 4)
+for i in range(n):
+    t = i / rate
+    env = math.sin(math.pi * t / dur) ** 0.6 * math.exp(-1.8 * t)
+    l = env * 0.35 * (math.sin(2*math.pi*523.25*t) + 0.6*math.sin(2*math.pi*659.25*t) + 0.4*math.sin(2*math.pi*1046.5*t))
+    r = env * 0.35 * (math.sin(2*math.pi*659.25*t) + 0.6*math.sin(2*math.pi*783.99*t) + 0.4*math.sin(2*math.pi*1046.5*t))
+    struct.pack_into("<hh", buf, i*4, int(max(-1,min(1,l))*32767), int(max(-1,min(1,r))*32767))
+s = socket.create_connection(("127.0.0.1", 48293), timeout=3)
+s.sendall(b"ARCHDROID_PCM rate=48000 channels=2\n")
+s.sendall(buf)
+s.close()
+' && echo "✓ PCM AudioTrack playback complete!"
+        else
+            archdroid-tts "ArchDroid audio subsystem is online and ready."
+        fi
+        ;;
+
+    play-pcm)
+        FILE="$1"
+        exec 3>/dev/tcp/127.0.0.1/48293 || { echo "Error: Cannot connect to PCM sink 127.0.0.1:48293"; exit 1; }
+        if [ -n "$FILE" ] && [ -f "$FILE" ]; then
+            cat "$FILE" >&3
+        else
+            cat >&3
+        fi
+        exec 3>&-
+        ;;
+
+    play)
+        FILE="$1"
+        if [ -z "$FILE" ]; then
+            echo "Usage: archdroid-audio play <file_or_url>"
+            exit 1
+        fi
+        if command -v ffmpeg >/dev/null 2>&1 && [ -f "$FILE" ]; then
+            echo "Streaming '$FILE' via real-time PCM AudioTrack (127.0.0.1:48293)..."
+            ffmpeg -loglevel error -re -i "$FILE" -f s16le -ar 48000 -ac 2 - > /dev/tcp/127.0.0.1/48293
+        else
+            archdroid-media-player play "$FILE"
+        fi
+        ;;
+
+    setup-pulse)
+        mkdir -p /root/.config/pulse /tmp
+        FIFO="/tmp/archdroid-pulse.fifo"
+        [ -p "$FIFO" ] || mkfifo "$FIFO" 2>/dev/null || true
+        cat > /root/.config/pulse/default.pa << 'EOF'
+.nofail
+load-module module-native-protocol-unix auth-anonymous=1
+load-module module-pipe-sink sink_name=archdroid_sink file=/tmp/archdroid-pulse.fifo format=s16le rate=48000 channels=2
+set-default-sink archdroid_sink
+EOF
+        # Start background FIFO -> TCP 48293 bridge loop if not already running
+        if ! pgrep -f "archdroid-pulse.fifo" >/dev/null 2>&1; then
+            nohup bash -c 'while true; do if [ -p /tmp/archdroid-pulse.fifo ]; then cat /tmp/archdroid-pulse.fifo > /dev/tcp/127.0.0.1/48293 2>/dev/null; fi; sleep 1; done' >/dev/null 2>&1 &
+        fi
+        if command -v pulseaudio >/dev/null 2>&1; then
+            pulseaudio --kill >/dev/null 2>&1 || true
+            pulseaudio --start --exit-idle-time=-1 >/dev/null 2>&1 || true
+            echo "✓ PulseAudio configured and bridged to ArchDroid PCM Sink (127.0.0.1:48293)"
+        else
+            echo "✓ PulseAudio config written to ~/.config/pulse/default.pa and FIFO bridge active."
+            echo "  (Install pulseaudio with: pacman -S pulseaudio)"
+        fi
+        ;;
+
+    *)
+        echo "Usage: archdroid-audio <command>"
+        echo "Commands:"
+        echo "  status              Check HTTP media bridge (:48292) & PCM AudioTrack (:48293)"
+        echo "  test                Play a synthesized stereo harmonic chime via PCM AudioTrack"
+        echo "  play <file>         Play audio file via ffmpeg PCM stream or MediaPlayer"
+        echo "  play-pcm [file]     Stream raw S16LE 48kHz stereo PCM to 127.0.0.1:48293"
+        echo "  setup-pulse         Configure PulseAudio pipe sink to stream to 127.0.0.1:48293"
+        ;;
+esac

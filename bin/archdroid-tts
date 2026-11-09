@@ -1,0 +1,51 @@
+#!/bin/bash
+PITCH="1.0"
+RATE="1.0"
+LANG_CODE=""
+QUEUE="flush"
+ACTION="speak"
+TEXT=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -p|--pitch) PITCH="$2"; shift 2 ;;
+        -r|--rate) RATE="$2"; shift 2 ;;
+        -l|--lang) LANG_CODE="$2"; shift 2 ;;
+        -q|--queue) QUEUE="$2"; shift 2 ;;
+        -s|--stop) ACTION="stop"; shift ;;
+        --status) ACTION="status"; shift ;;
+        -h|--help)
+            echo "Usage: archdroid-tts [-p pitch] [-r rate] [-l lang] [-q flush|add] [-s|--stop] <text>"
+            echo "       echo 'Hello world' | archdroid-tts"
+            exit 0
+            ;;
+        *)
+            if [ -z "$TEXT" ]; then
+                TEXT="$1"
+            else
+                TEXT="$TEXT $1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [ "$ACTION" = "stop" ] || [ "$ACTION" = "status" ]; then
+    curl -s -X POST "http://127.0.0.1:48292/api/tts" -d "action=$ACTION" 2>/dev/null
+    echo ""
+    exit 0
+fi
+
+if [ -z "$TEXT" ] && [ ! -t 0 ]; then
+    TEXT="$(cat)"
+fi
+
+if [ -z "$TEXT" ]; then
+    echo '{"error":"Missing text to speak"}'
+    exit 1
+fi
+
+ARGS=(-d "action=speak" -d "pitch=$PITCH" -d "rate=$RATE" -d "queue=$QUEUE" --data-urlencode "text=$TEXT")
+[ -n "$LANG_CODE" ] && ARGS+=(-d "lang=$LANG_CODE")
+curl -s -X POST "http://127.0.0.1:48292/api/tts" "${ARGS[@]}" 2>/dev/null
+echo ""
