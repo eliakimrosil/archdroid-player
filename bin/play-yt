@@ -1,6 +1,8 @@
 #!/bin/bash
 if [ -z "$1" ]; then
     echo "Usage: play-yt <search_query_or_url>"
+    echo "       play-yt --pulse <search_query_or_url>  (Streams via PulseAudio for visualizers)"
+    echo "       play-yt --vis <search_query_or_url>    (Plays with live terminal visualizer)"
     echo "       play-yt [stop|pause|resume|status]"
     echo "Example: play-yt 'calvin harris outside'"
     exit 1
@@ -8,6 +10,7 @@ fi
 
 case "$1" in
     stop|--stop)
+        pkill -f "ffmpeg.*pulse.*archdroid_sink" 2>/dev/null || true
         archdroid-media-player stop
         exit 0
         ;;
@@ -22,6 +25,14 @@ case "$1" in
     status|--status)
         archdroid-media-player status
         exit 0
+        ;;
+    --vis|-v)
+        shift
+        exec archdroid-visualizer --yt "$*"
+        ;;
+    --pulse|-p)
+        shift
+        USE_PULSE=true
         ;;
 esac
 
@@ -58,4 +69,11 @@ fi
 if command -v archdroid-notification >/dev/null 2>&1; then
     archdroid-notification -t "YouTube Music" -c "${TITLE:-$QUERY}" -p default
 fi
-archdroid-media-player play "$STREAM_URL"
+
+if [ "$USE_PULSE" = "true" ]; then
+    echo "Streaming to PulseAudio sink (archdroid_sink)..."
+    echo "Run 'archdroid-visualizer --pulse' or 'cava' in another terminal to visualize!"
+    exec ffmpeg -loglevel error -re -i "$STREAM_URL" -f pulse "archdroid_sink"
+else
+    archdroid-media-player play "$STREAM_URL"
+fi

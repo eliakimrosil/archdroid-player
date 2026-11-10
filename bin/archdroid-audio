@@ -80,48 +80,66 @@ s.close()
         ;;
 
     pulse-bridge)
-        FIFO="/tmp/archdroid-pulse.fifo"
-        [ -p "$FIFO" ] || mkfifo "$FIFO" 2>/dev/null || true
         python3 -c '
-import os, socket, time
-fifo_path = "/tmp/archdroid-pulse.fifo"
-if not os.path.exists(fifo_path):
-    os.mkfifo(fifo_path)
-fd = os.open(fifo_path, os.O_RDWR)
+import subprocess, socket, time, numpy as np
+
+cmd = ["parec", "-d", "archdroid_sink.monitor", "--format=s16le", "--rate=48000", "--channels=2", "--latency-msec=25"]
+try:
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=0)
+except Exception as e:
+    exit(1)
+
+sock = None
+last_active = 0
+
 while True:
     try:
-        s = socket.create_connection(("127.0.0.1", 48293), timeout=3)
-        s.sendall(b"ARCHDROID_PCM rate=48000 channels=2\n")
-        while True:
-            data = os.read(fd, 4096)
-            if data:
-                s.sendall(data)
+        data = proc.stdout.read(2048)
+        if not data:
+            time.sleep(0.01)
+            continue
+        samples = np.frombuffer(data, dtype=np.int16)
+        if np.max(np.abs(samples)) > 100:
+            last_active = time.time()
+            if sock is None:
+                try:
+                    sock = socket.create_connection(("127.0.0.1", 48293), timeout=2)
+                    sock.sendall(b"ARCHDROID_PCM rate=48000 channels=2\n")
+                except Exception:
+                    sock = None
+            if sock:
+                try:
+                    sock.sendall(data)
+                except Exception:
+                    sock = None
+        else:
+            if sock and (time.time() - last_active > 0.8):
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                sock = None
     except Exception:
-        time.sleep(1)
+        time.sleep(0.1)
 '
         ;;
 
     setup-pulse)
-        mkdir -p /root/.config/pulse /tmp
-        FIFO="/tmp/archdroid-pulse.fifo"
-        [ -p "$FIFO" ] || mkfifo "$FIFO" 2>/dev/null || true
+        mkdir -p /root/.config/pulse
         cat > /root/.config/pulse/default.pa << 'EOF'
 .nofail
 load-module module-native-protocol-unix auth-anonymous=1
-load-module module-pipe-sink sink_name=archdroid_sink file=/tmp/archdroid-pulse.fifo format=s16le rate=48000 channels=2
+load-module module-null-sink sink_name=archdroid_sink sink_properties=device.description="ArchDroid_Audio_Sink" rate=48000 channels=2
 set-default-sink archdroid_sink
 EOF
-        # Start background FIFO -> TCP 48293 bridge daemon if not running
-        pkill -f "pulse-bridge" 2>/dev/null || true
-        nohup archdroid-audio pulse-bridge >/dev/null 2>&1 &
         if command -v pulseaudio >/dev/null 2>&1; then
             pulseaudio --kill >/dev/null 2>&1 || true
+            sleep 0.5
             pulseaudio --start --exit-idle-time=-1 >/dev/null 2>&1 || true
-            echo "✓ PulseAudio configured and bridged to ArchDroid PCM Sink (127.0.0.1:48293)"
-        else
-            echo "✓ PulseAudio config written to ~/.config/pulse/default.pa and FIFO bridge active."
-            echo "  (Install pulseaudio with: pacman -S pulseaudio)"
         fi
+        pkill -f "pulse-bridge" 2>/dev/null || true
+        nohup archdroid-audio pulse-bridge >/dev/null 2>&1 &
+        echo "✓ PulseAudio null-sink configured & bridged to ArchDroid AudioTrack (127.0.0.1:48293)"
         ;;
 
     *)
