@@ -68,6 +68,18 @@ else
     echo -e "${GREEN}✓ All core dependencies (yt-dlp, ffmpeg, pulseaudio, curl) are installed.${NC}"
 fi
 
+# Ensure yt-dlp is updated and configured with a JavaScript runtime to prevent YouTube 403 Forbidden errors
+if command -v pip >/dev/null 2>&1; then
+    pip install --break-system-packages -q -U yt-dlp 2>/dev/null || true
+fi
+if command -v node >/dev/null 2>&1; then
+    mkdir -p /root/.config/yt-dlp
+    cat << 'EOF' > /root/.config/yt-dlp/config
+--js-runtimes node:/usr/sbin/node
+--no-warnings
+EOF
+fi
+
 # 3. Install Tools into /usr/local/bin and link to /usr/bin
 echo ""
 echo -e "${BLUE}[2/4] Installing CLI tools to $TARGET_DIR...${NC}"
