@@ -1,9 +1,29 @@
 #!/bin/bash
 if [ -z "$1" ]; then
     echo "Usage: play-yt <search_query_or_url>"
+    echo "       play-yt [stop|pause|resume|status]"
     echo "Example: play-yt 'calvin harris outside'"
     exit 1
 fi
+
+case "$1" in
+    stop|--stop)
+        archdroid-media-player stop
+        exit 0
+        ;;
+    pause|--pause)
+        archdroid-media-player pause
+        exit 0
+        ;;
+    resume|--resume)
+        archdroid-media-player resume
+        exit 0
+        ;;
+    status|--status)
+        archdroid-media-player status
+        exit 0
+        ;;
+esac
 
 QUERY="$*"
 case "$QUERY" in
@@ -16,8 +36,15 @@ case "$QUERY" in
 esac
 
 echo "Fetching stream from YouTube: $QUERY..."
-TITLE=$(yt-dlp --get-title "$TARGET" 2>/dev/null | head -n 1)
-STREAM_URL=$(yt-dlp -f bestaudio -g "$TARGET" 2>/dev/null | head -n 1)
+META=$(yt-dlp --no-warnings --print "%(title)s" --print "%(url)s" -f "ba/b" "$TARGET" 2>/dev/null)
+TITLE=$(echo "$META" | head -n 1)
+STREAM_URL=$(echo "$META" | sed -n '2p')
+
+# Fallback if needed
+if [ -z "$STREAM_URL" ]; then
+    STREAM_URL=$(yt-dlp -f bestaudio -g "$TARGET" 2>/dev/null | head -n 1)
+    [ -z "$TITLE" ] && TITLE=$(yt-dlp --get-title "$TARGET" 2>/dev/null | head -n 1)
+fi
 
 if [ -z "$STREAM_URL" ]; then
     echo "Error: Could not resolve audio stream for '$QUERY'"

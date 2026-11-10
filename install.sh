@@ -60,7 +60,7 @@ command -v pulseaudio >/dev/null 2>&1 || NEEDED_PKGS+=("pulseaudio")
 if [ ${#NEEDED_PKGS[@]} -gt 0 ]; then
     echo "Installing missing dependencies: ${NEEDED_PKGS[*]}"
     if command -v pacman >/dev/null 2>&1; then
-        pacman -Syu --noconfirm "${NEEDED_PKGS[@]}"
+        pacman -S --needed --noconfirm "${NEEDED_PKGS[@]}"
     else
         echo -e "${YELLOW}Warning: pacman not found. Please install manually: ${NEEDED_PKGS[*]}${NC}"
     fi

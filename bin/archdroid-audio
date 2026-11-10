@@ -56,6 +56,7 @@ s.close()
     play-pcm)
         FILE="$1"
         exec 3>/dev/tcp/127.0.0.1/48293 || { echo "Error: Cannot connect to PCM sink 127.0.0.1:48293"; exit 1; }
+        printf "ARCHDROID_PCM rate=48000 channels=2\n" >&3
         if [ -n "$FILE" ] && [ -f "$FILE" ]; then
             cat "$FILE" >&3
         else
@@ -72,10 +73,32 @@ s.close()
         fi
         if command -v ffmpeg >/dev/null 2>&1 && [ -f "$FILE" ]; then
             echo "Streaming '$FILE' via real-time PCM AudioTrack (127.0.0.1:48293)..."
-            ffmpeg -loglevel error -re -i "$FILE" -f s16le -ar 48000 -ac 2 - > /dev/tcp/127.0.0.1/48293
+            (printf "ARCHDROID_PCM rate=48000 channels=2\n"; ffmpeg -loglevel error -re -i "$FILE" -f s16le -ar 48000 -ac 2 -) > /dev/tcp/127.0.0.1/48293
         else
             archdroid-media-player play "$FILE"
         fi
+        ;;
+
+    pulse-bridge)
+        FIFO="/tmp/archdroid-pulse.fifo"
+        [ -p "$FIFO" ] || mkfifo "$FIFO" 2>/dev/null || true
+        python3 -c '
+import os, socket, time
+fifo_path = "/tmp/archdroid-pulse.fifo"
+if not os.path.exists(fifo_path):
+    os.mkfifo(fifo_path)
+fd = os.open(fifo_path, os.O_RDWR)
+while True:
+    try:
+        s = socket.create_connection(("127.0.0.1", 48293), timeout=3)
+        s.sendall(b"ARCHDROID_PCM rate=48000 channels=2\n")
+        while True:
+            data = os.read(fd, 4096)
+            if data:
+                s.sendall(data)
+    except Exception:
+        time.sleep(1)
+'
         ;;
 
     setup-pulse)
@@ -88,10 +111,9 @@ load-module module-native-protocol-unix auth-anonymous=1
 load-module module-pipe-sink sink_name=archdroid_sink file=/tmp/archdroid-pulse.fifo format=s16le rate=48000 channels=2
 set-default-sink archdroid_sink
 EOF
-        # Start background FIFO -> TCP 48293 bridge loop if not already running
-        if ! pgrep -f "archdroid-pulse.fifo" >/dev/null 2>&1; then
-            nohup bash -c 'while true; do if [ -p /tmp/archdroid-pulse.fifo ]; then cat /tmp/archdroid-pulse.fifo > /dev/tcp/127.0.0.1/48293 2>/dev/null; fi; sleep 1; done' >/dev/null 2>&1 &
-        fi
+        # Start background FIFO -> TCP 48293 bridge daemon if not running
+        pkill -f "pulse-bridge" 2>/dev/null || true
+        nohup archdroid-audio pulse-bridge >/dev/null 2>&1 &
         if command -v pulseaudio >/dev/null 2>&1; then
             pulseaudio --kill >/dev/null 2>&1 || true
             pulseaudio --start --exit-idle-time=-1 >/dev/null 2>&1 || true
@@ -109,6 +131,7 @@ EOF
         echo "  test                Play a synthesized stereo harmonic chime via PCM AudioTrack"
         echo "  play <file>         Play audio file via ffmpeg PCM stream or MediaPlayer"
         echo "  play-pcm [file]     Stream raw S16LE 48kHz stereo PCM to 127.0.0.1:48293"
+        echo "  pulse-bridge        Run persistent FIFO to AudioTrack bridge daemon"
         echo "  setup-pulse         Configure PulseAudio pipe sink to stream to 127.0.0.1:48293"
         ;;
 esac
